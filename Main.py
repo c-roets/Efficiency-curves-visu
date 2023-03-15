@@ -221,7 +221,7 @@ def efficiencylosses(gridparams):
                 pp = round(100*gridpower/power)
                 eff1 = effcurve[pp]
                 print(f"Percentage load converter 1: {pp}%")
-                print(f"DC Efficiency f converter 1: {round(100*eff1,2)}%")
+                print(f"DC Efficiency for converter 1: {round(100*eff1,2)}%")
                 break  # Stop searching after finding the first match
 
     # Part 2 DC-AC / DC-DC EV charging - converter 2
@@ -257,19 +257,15 @@ def efficiencylosses(gridparams):
                 Vdc = np.arange(160, 380, 20)
                 # Find the index of the element in Vdc that is closest to voltage
                 vv = np.argmin(np.abs(V - evvdc))
-                print(f"Closest chosen EV voltage:{V[vv]}, element number: {vv}")
+                print(f"Closest chosen EV voltage:{V[vv]} (actual:{evvdc}), element number: {vv}")
                 jj = np.argmin(np.abs(Vdc - vdc))
-                print(f"Closest chosen DC voltage:{Vdc[jj]}, element number: {jj}")
+                print(f"Closest chosen DC voltage:{Vdc[jj]} (actual:{vdc}), element number: {jj}")
                 eff2dc = effcurve[pp, vv, jj]
                 print(f"Percentage load DC converter 2: {pp}%")
                 print(f"DC Efficiency for DC converter 2: {round(100 * eff2dc, 2)}%")
                 break  # Stop searching after finding the first match
 
     # Part 2.1 AC efficiency
-    vdc = gridparams["AC-DC CONVERTER 1"]["VDC"]
-    vac = gridparams["AC-DC CONVERTER 1"]["VAC"]
-    evvdc = gridparams["DC-DC/AC-DC CONVERTER 2"]["EVVoltagedc"]
-    evp = gridparams["DC-DC/AC-DC CONVERTER 2"]["EVPower"]
     directory = r'data\effcurves\ac\dc-ac\ev'
 
     power_levels = []
@@ -298,9 +294,96 @@ def efficiencylosses(gridparams):
                 print(f"AC Efficiency for converter 2: {round(100 * eff2ac, 2)}%")
                 break  # Stop searching after finding the first match
 
+    # Part 3 DC-AC / DC-DC PV generation - converter 3
+    # Part 3.1 DC efficiency
+    vdc = gridparams["AC-DC CONVERTER 1"]["VDC"]
+    vac = gridparams["AC-DC CONVERTER 1"]["VAC"]
+    pvvdc = gridparams["DC-DC/AC-DC CONVERTER 3"]["PVVoltagedc"]
+    pvp = gridparams["DC-DC/AC-DC CONVERTER 3"]["PVPower"]
+    directory = r'data\effcurves\dc\dc-dc\pv'
 
+    power_levels = []
+    for file in os.listdir(directory):
+        if file.endswith(".npy"):
+            power = float(file.split("_")[1].replace("kW", ""))
+            power_levels.append(power * 1000)
+    # Round up the grid power to the nearest available power level
+    nearest_power = min(power_levels, key=lambda x: abs(x - evp))
+    for file in os.listdir(directory):
+        # Check if the file is a numpy file
+        if file.endswith(".npy"):
+            # Extract the power value from the file name
+            power = 1000 * float(file.split("_")[1].replace("kW", ""))
 
+            # Check if the power matches the target power
+            if power == nearest_power:
+                # Load the numpy file and do something with it
+                file_path = os.path.join(directory, file)
+                effcurve = np.load(file_path)
+                print(f"Loaded file for DC converter 3:{file}")
+                # Do something with the data here
+                pp = round(100 * pvp / power)
+                if pp == 100:  # nodig omdat 100% waarde niet bestaat in effcurve voor pv
+                    pp = 99
+                V=np.arange(230, 490, 10)  # FROM THE EFFICIENCY CURVES FILE
+                # Find the index of the element in Vdc that is closest to voltage
+                vv = np.argmin(np.abs(V - pvvdc))
+                print(f"Closest chosen PV voltage:{V[vv]} (actual:{pvvdc}), element number: {vv}")
+                eff3dc = effcurve[pp, vv]
+                print(f"Percentage load DC converter 3: {pp}%")
+                print(f"DC Efficiency for DC converter 3: {round(100 * eff3dc, 2)}%")
+                break  # Stop searching after finding the first match
+    """
+    # data\effcurves\ac\dc-ac\pv doesn't exist
+    # Part 3.1 AC efficiency
+    directory = r'data\effcurves\ac\dc-ac\pv'
+    """
 
+    # Part 4 DC-AC / DC-DC EV charging - converter 4
+    # Part 4.1 DC efficiency
+    vdc = gridparams["AC-DC CONVERTER 1"]["VDC"]
+    vac = gridparams["AC-DC CONVERTER 1"]["VAC"]
+    bessvdc = gridparams["DC-DC/AC-DC CONVERTER 4"]["BESSVoltagedc"]
+    bessp = gridparams["DC-DC/AC-DC CONVERTER 4"]["BESSPower"]
+    directory = r'data\effcurves\dc\dc-dc\bess'
+
+    power_levels = []
+    for file in os.listdir(directory):
+        if file.endswith(".npy"):
+            power = float(file.split("_")[1].replace("kW", ""))
+            power_levels.append(power * 1000)
+    # Round up the grid power to the nearest available power level
+    nearest_power = min(power_levels, key=lambda x: abs(x - evp))
+    for file in os.listdir(directory):
+        # Check if the file is a numpy file
+        if file.endswith(".npy"):
+            # Extract the power value from the file name
+            power = 1000 * float(file.split("_")[1].replace("kW", ""))
+
+            # Check if the power matches the target power
+            if power == nearest_power:
+                # Load the numpy file and do something with it
+                file_path = os.path.join(directory, file)
+                effcurve = np.load(file_path)
+                print(f"Loaded file for DC converter 4:{file}")
+                # Do something with the data here
+                pp = round(100 * bessp / power)
+                if pp == 100:
+                    pp = 99
+                V=np.arange(690, 960, 10)  # FROM THE EFFICIENCY CURVES FILE
+                # Find the index of the element in Vdc that is closest to voltage
+                vv = np.argmin(np.abs(V - bessvdc))
+                print(f"Closest chosen BESS voltage:{V[vv]} (actual:{bessvdc}), element number: {vv}")
+                eff4dc = effcurve[pp, vv]
+                print(f"Percentage load DC converter 4: {pp}%")
+                print(f"DC Efficiency for DC converter 4: {round(100 * eff4dc, 2)}%")
+                break  # Stop searching after finding the first match
+
+    """
+    # data\effcurves\ac\dc-ac\bess doesn't exist
+    # Part 4.1 AC efficiency
+    directory = r'data\effcurves\ac\dc-ac\bess'
+    """
 
 # Distribution of arrival EVs CSV file names
 wkd = 'distribution-of-arrival.csv'
@@ -326,15 +409,16 @@ gridparameters = {
         "PVVoltagedc": 480
     },
     "DC-DC/AC-DC CONVERTER 4": {
-        "BESSpower": 25e3,
-        "BESSvoltagedc": 950
+        "BESSPower": 25e3,
+        "BESSVoltagedc": 950
     }
 }
 
 VisualizeProfiles = False  # visualization of 35040 data points can
 # take a while (c.a. 30 sec on I7 8th gen -16GB RAM) and spin up your pc
+
 # NetEnergy = calculateprofile(wkd, wke, numb_chargers, VisualizeProfiles)
-# NetEnergy array with net energy use per quarter-hour for one whole year
+# NetEnergy is an array with net energy use per quarter-hour for one whole year
 # print(NetEnergy)
 
 efficiencylosses(gridparameters)
