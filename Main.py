@@ -244,9 +244,13 @@ def efficiencylosses(gridparams, evprofile, pvprofile, acprofile):
                     pp = round(100 * (acprofile[i] / (power * 0.25)))  # divide by 25 to convert kWh in quarter-hour to average kW for 15 min
                     # converter gets overloaded error
                     eff1[i] = effcurve[pp]  # array with converter efficiency in each quarter-hour
-                    np.set_printoptions()
+                eff1 = eff1.reshape((-1,1))
                 print("Efficiencies for DC-AC: AC-profile conversion:")
                 print(eff1)
+                acprofile = acprofile.reshape((-1, 1))
+                print("Losses for DC-AC: AC-profile conversion:")
+                eff1losses=acprofile-(acprofile*eff1)
+                print(eff1losses)
                 break  # Stop searching after finding the first match
 
     # Part 2 DC-AC / DC-DC EV charging - converter 2
@@ -279,16 +283,19 @@ def efficiencylosses(gridparams, evprofile, pvprofile, acprofile):
                 # Do something with the data here
                 V = np.arange(250, 370, 10)  # FROM THE EFFICIENCY CURVES FILE
                 Vdc = np.arange(160, 380, 20)
-                eff2dc = np.zeros((EVprofile.shape[0], EVprofile.shape[1]))
-                for i in range(EVprofile.shape[1]):  # iterate over chargers
-                    for j in range(EVprofile.shape[0]):  # iterate over energy values
-                        pp = round(100 * (EVprofile[j,i] / (power*0.25)))
+                eff2dc = np.zeros((evprofile.shape[0], evprofile.shape[1]))
+                for i in range(evprofile.shape[1]):  # iterate over chargers
+                    for j in range(evprofile.shape[0]):  # iterate over energy values
+                        pp = round(100 * (evprofile[j,i] / (power*0.25)))
                         vv = np.argmin(np.abs(V - evvdc))  # Find the index of the element in Vdc that is closest to voltage
                         jj = np.argmin(np.abs(Vdc - vdc))
                         eff2dc[j,i] = effcurve[pp, vv, jj]
-                eff2dc = eff2dc.flatten()
-                print("Efficiencies for DC-DC: EV-profile conversion:")
+
+                print("Efficiencies for DC-DC: EV-profile conversion in DC:")
                 print(eff2dc)
+                print("Losses for DC-DC: EV-profile conversion in DC:")
+                eff2dclosses = evprofile - (evprofile * eff2dc)
+                print(eff2dclosses)
                 break  # Stop searching after finding the first match
 
     # Part 2.1 AC efficiency
@@ -314,16 +321,17 @@ def efficiencylosses(gridparams, evprofile, pvprofile, acprofile):
                 effcurve = np.load(file_path)
                 print(f"Loaded file for AC converter 2:{file}")
                 # Do something with the data here
-                eff2ac = np.zeros((EVprofile.shape[0], EVprofile.shape[1]))
-                for i in range(EVprofile.shape[1]):
-                    for j in range(EVprofile.shape[0]):
-                        pp = round(100 * (EVprofile[j,i] / (power*0.25)))
+                eff2ac = np.zeros((evprofile.shape[0], evprofile.shape[1]))
+                for i in range(evprofile.shape[1]):
+                    for j in range(evprofile.shape[0]):
+                        pp = round(100 * (evprofile[j,i] / (power*0.25)))
                         eff2ac[j,i] = effcurve[pp]
-                eff2ac = eff2ac.flatten()
-                print("Efficiencies for DC-AC: EV-profile conversion:")
+                print("Efficiencies for DC-DC: EV-profile conversion in AC:")
                 print(eff2ac)
+                print("Losses for DC-DC: EV-profile conversion in DC in AC:")
+                eff2aclosses = evprofile - (evprofile * eff2ac)
+                print(eff2aclosses)
                 break  # Stop searching after finding the first match
-    return eff1, eff2dc, eff2ac
 
     # Part 3 DC-AC / DC-DC PV generation - converter 3
     # Part 3.1 DC efficiency
@@ -339,7 +347,7 @@ def efficiencylosses(gridparams, evprofile, pvprofile, acprofile):
             power = float(file.split("_")[1].replace("kW", ""))
             power_levels.append(power * 1000)
     # Round up the grid power to the nearest available power level
-    nearest_power = min(power_levels, key=lambda x: abs(x - evp))
+    nearest_power = min(power_levels, key=lambda x: abs(x - pvp))
     for file in os.listdir(directory):
         # Check if the file is a numpy file
         if file.endswith(".npy"):
@@ -351,26 +359,77 @@ def efficiencylosses(gridparams, evprofile, pvprofile, acprofile):
                 # Load the numpy file and do something with it
                 file_path = os.path.join(directory, file)
                 effcurve = np.load(file_path)
-                print(f"Loaded file for DC converter 3:{file}")
+                print(f"Loaded file for DC-DC converter PV on DC grid:{file}")
                 # Do something with the data here
-                pp = round(100 * pvp / power)
-                if pp == 100:  # nodig omdat 100% waarde niet bestaat in effcurve voor pv
-                    pp = 99
                 V = np.arange(230, 490, 10)  # FROM THE EFFICIENCY CURVES FILE
                 # Find the index of the element in Vdc that is closest to voltage
                 vv = np.argmin(np.abs(V - pvvdc))
-                print(f"Closest chosen PV voltage:{V[vv]} (actual:{pvvdc}), element number: {vv}")
-                eff3dc = effcurve[pp, vv]
-                print(f"Percentage load DC converter 3: {pp}%")
-                print(f"DC Efficiency for DC converter 3: {round(100 * eff3dc, 2)}%")
-                break  # Stop searching after finding the first match
-    """
-    # data\effcurves\ac\dc-ac\pv doesn't exist
-    # Part 3.1 AC efficiency
-    directory = r'data\effcurves\ac\dc-ac\pv'
-    """
+                #eff3dc = np.zeros(pvprofile.shape[0],pvprofile.shape[1])
+                eff3dc = np.zeros(len(pvprofile))
+                for i in range(pvprofile.shape[0]):
+                    pp = round(100 * (pvprofile[i] / (power * 0.25)))  # divide by 25 to convert kWh in quarter-hour to average kW for 15 min
+                    if pp == 100:  # nodig omdat 100% waarde niet bestaat in effcurve voor pv
+                        pp = 99
+                    eff3dc[i] = effcurve[pp, vv]  # array with converter efficiency in each quarter-hour
+                eff3dc = eff3dc.reshape((-1, 1))
+                print("Efficiencies for DC-DC: PV-profile conversion in DC:")
+                # np.set_printoptions(threshold=np.inf)
+                print(eff3dc)  # looks like it's all zero but that's just first and last values
+                # no pv generation at midnight during year transition
+                # np.set_printoptions()
+                print("Losses for DC-DC: PV-profile conversion in DC:")
+                pvprofile_re = pvprofile.reshape((-1, 1))
+                eff3dclosses = pvprofile_re - (pvprofile_re * eff3dc) # memory leak FIIIIIXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                print(eff3dclosses)                             # ALSO GENERATE MORE PV POWER CURVES IN AC DC DC, MORE THEN 10KW REQUIRED
 
-    # Part 4 DC-AC / DC-DC EV charging - converter 4
+                break  # Stop searching after finding the first match
+
+    # Part 3.1.1 DC efficiency on AC grid
+    directory = r'data\effcurves\ac\dc-dc\pv'
+
+    power_levels = []
+    for file in os.listdir(directory):
+        if file.endswith(".npy"):
+            power = float(file.split("_")[1].replace("kW", ""))
+            power_levels.append(power * 1000)
+    # Round up the grid power to the nearest available power level
+    nearest_power = min(power_levels, key=lambda x: abs(x - pvp))
+    for file in os.listdir(directory):
+        # Check if the file is a numpy file
+        if file.endswith(".npy"):
+            # Extract the power value from the file name
+            power = 1000 * float(file.split("_")[1].replace("kW", ""))
+
+            # Check if the power matches the target power
+            if power == nearest_power:
+                # Load the numpy file and do something with it
+                file_path = os.path.join(directory, file)
+                effcurve = np.load(file_path)
+                print(f"Loaded file for DC-DC converter PV on AC grid:{file}")
+                # Do something with the data here
+                V=np.arange(180, 325, 10)  # FROM THE EFFICIENCY CURVES FILE
+                # Find the index of the element in Vdc that is closest to voltage
+                vv = np.argmin(np.abs(V - pvvdc))
+                # eff3dc = np.zeros(pvprofile.shape[0],pvprofile.shape[1])
+                eff3dc_ac = np.zeros(len(pvprofile))
+                for i in range(pvprofile.shape[0]):
+                    pp = round(100 * (pvprofile[i] / (power * 0.25)))  # divide by 25 to convert kWh in quarter-hour to average kW for 15 min
+                    if pp == 100:  # nodig omdat 100% waarde niet bestaat in effcurve voor pv
+                        pp = 99
+                    eff3dc_ac[i] = effcurve[pp, vv]  # array with converter efficiency in each quarter-hour
+                eff3dc_ac = eff3dc_ac.reshape((-1, 1))
+                print("Efficiencies for DC-DC: PV-profile conversion in AC:")
+                # np.set_printoptions(threshold=np.inf)
+                print(eff3dc_ac)  # looks like it's all zero but that's just first and last values
+                # no pv generation at midnight during year transition
+                # np.set_printoptions()
+                print("Losses for DC-DC: PV-profile conversion in DC in AC:")
+                eff3dc_aclosses = pvprofile_re - (pvprofile_re * eff3dc_ac)
+                print(eff3dc_aclosses)
+                break  # Stop searching after finding the first match
+    return 1
+
+    # Part 4 DC-AC / DC-DC BESS - converter 4
     # Part 4.1 DC efficiency
     vdc = gridparams["AC-DC CONVERTER 1"]["VDC"]
     vac = gridparams["AC-DC CONVERTER 1"]["VAC"]
@@ -417,14 +476,14 @@ def efficiencylosses(gridparams, evprofile, pvprofile, acprofile):
     """
 
 
-# Distribution of arrival EVs CSV file names
+# file names
 wkd = 'distribution-of-arrival.csv'
 wke = 'distribution-of-arrival (1).csv'
 acp = 'data/LoadProfiles/slp_industrie.csv'
-acdata = 'S12 56-100KVA'
+acdata = 'S12 56-100KVA' # kolom in acp met de actuele data van ac verbruik
 pvp = "pv_kWh_kWp.npy"
 # amount of chargers
-numb_chargers = 1
+numb_chargers = 2
 
 # =============================================================================
 # Grid parameters
@@ -440,8 +499,8 @@ gridparameters = {
         "EVVoltagedc": 360
     },
     "DC-DC/AC-DC CONVERTER 3": {
-        "PVPower": 5e3,
-        "PVVoltagedc": 480
+        "PVPower": 20e3,
+        "PVVoltagedc": 320
     },
     "DC-DC/AC-DC CONVERTER 4": {
         "BESSPower": 25e3,
@@ -455,5 +514,4 @@ VisualizeProfiles = False  # visualization of 35040 data points can
 # take a while (c.a. 30 sec on I7 8th gen -16GB RAM) and spin up your pc
 
 EVprofile, PVprofile, ACprofile = calculateprofile(wkd, wke, acp, acdata, pvp, numb_chargers, gridparameters, VisualizeProfiles)
-
 efficiencylosses(gridparameters, EVprofile, PVprofile, ACprofile)
