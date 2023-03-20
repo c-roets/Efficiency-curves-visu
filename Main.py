@@ -6,7 +6,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
+
+def calculateprofile(arrivalweekday, arrivalweekend, acprofile, acdatacolumn, pvprofile, no_chargers, gridparams, visu=False):
+
     # =============================================================================
     # EV PROFILE
     # =============================================================================
@@ -66,9 +68,11 @@ def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
     energy_need = distr * (1. / distr.sum())
 
     E_charge_full = 60e3  # 60kWh Battery
+    powerlimit = gridparams["DC-DC/AC-DC CONVERTER 2"]["EVPower"]*0.25  # max amount of Wh charging possible in 15 min accounting for charging power
     E_charge_needs = np.zeros([35040, no_chargers])
     E_charge_needs_day = np.zeros([365, no_chargers])
     day_index = 0
+    buffer = 0
     if visu:
         start_date = pd.to_datetime('2022-01-01')
         datetimes = [start_date + pd.Timedelta(minutes=15 * i) for i in range(E_charge_needs.shape[0])]
@@ -78,8 +82,12 @@ def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
     for ch in range(0, no_chargers):
         print('charger number:' + str(ch))
         for qh in range(0, 35040):
-            E_need = np.random.choice(np.linspace(1, E_charge_full / 96, 99), size=1, p=energy_need)
-            # divide E_charge_full by 96 to get quarterly hourly charge requirements
+            E_need = np.random.choice(np.linspace(1, E_charge_full, 99), size=1, p=energy_need)
+            E_need += buffer
+            buffer = 0
+            if E_need > powerlimit:
+                buffer = E_need - powerlimit
+                E_need = powerlimit
             E_charge_needs[qh, ch] = E_need
             # compile every 96 quarter hours into a day
             if qh > 0 and (qh + 1) % 96 == 0:
@@ -90,24 +98,17 @@ def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
             # print(E_charge_needs.shape)
             print(E_charge_needs)
 
-            ax.bar(datetimes, E_charge_needs[:, ch], width=pd.Timedelta(minutes=15), alpha=0.7,
+            ax.bar(datetimes[:96], E_charge_needs[:96, ch], width=pd.Timedelta(minutes=15), alpha=0.7,
                    label='Charger {}'.format(ch + 1), color=colors[ch])
         day_index = 0
 
     if visu:
         ax.set_xlabel('Day of year')
-        ax.set_ylabel('Energy charge needs (kWh)')
+        ax.set_ylabel('Energy charge needs (Wh)')
         ax.set_title('Energy charge needs per quarter-hour')
         ax.legend(loc='upper left')
         print('Number of chargers plotted: {}'.format(no_chargers))
         plt.show()
-    # if visu:
-
-        # =============================================================================
-        # Visualize energy needs per qh
-        # =============================================================================
-
-
         # =============================================================================
         # Visualize energy needs per day
         # =============================================================================
@@ -118,27 +119,26 @@ def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
 
         # Set the axis labels and title
         ax.set_xlabel('Day of year')
-        ax.set_ylabel('Energy charge needs (kWh)')
+        ax.set_ylabel('Energy charge needs (Wh)')
         ax.set_title('Energy charge needs per day')
         ax.legend(loc='upper left')
         plt.show()
 
     print("Summing charger values...")
-    #Total energy demand of all chargers summed
+    # Total energy demand of all chargers summed
     E_charge_needs_total = np.sum(E_charge_needs, axis=1)
     E_charge_needs_total = E_charge_needs_total.reshape((35040, 1))
     E_charge_needs_total = E_charge_needs_total.flatten()
     print(E_charge_needs_total)
     print("Summing charger values completed!")
 
-
     if visu:
         print("Loading graph...")
         fig, ax = plt.subplots(figsize=(20, 8))
         ax.bar(datetimes, E_charge_needs_total, width=pd.Timedelta(minutes=15), alpha=0.7, linewidth=2.0)
         ax.set_xlabel('Day of year')
-        ax.set_ylabel('Energy charge needs (kWh) (sum of chargers)')
-        ax.set_title('Energy charge needs per quater-hour summed')
+        ax.set_ylabel('Energy charge needs (Wh) (sum of chargers)')
+        ax.set_title('Energy charge needs per quater-hour chargers summed')
         plt.show()
 
     print("Calculating EV Energy needs completed!")
@@ -147,7 +147,7 @@ def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
     # PV Profile
     # =============================================================================
     print("Loading PV Generation profile...")
-    pv = np.load("pv_kWh_kWp.npy")
+    pv = np.load(pvprofile)
     print(pv.shape)
     print(pv)
     if visu:
@@ -164,11 +164,32 @@ def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
         ax.set_title('PV Energy Generation by Quarter Hour')
         plt.show()
     print("Loading PV Generation profile completed!")
+
+    # =============================================================================
+    # AC profile
+    # =============================================================================
+    '''Load demand profiles (slp S12)'''
+
+    E_demand = 100e6
+    df_lp = pd.read_csv(acprofile, index_col=0)
+    lp_profile = df_lp[acdatacolumn] * 4 * E_demand;
+    aclp = lp_profile.values
+    if visu:
+        print("Loading graph...")
+        start_date = pd.to_datetime('2022-01-01')
+        datetimes = [start_date + pd.Timedelta(minutes=15 * i) for i in range(lp_profile.size)]
+        fig, ax = plt.subplots(figsize=(16, 6))
+        ax.bar(datetimes, lp_profile.values, width=pd.Timedelta(minutes=15), alpha=0.7)
+        #ax.bar(x=lp_profile.index, height=lp_profile.values)
+        ax.set_xlabel('Quarter Hour')
+        ax.set_ylabel('Energy Demand (Wh)')
+        ax.set_title('Load Profile')
+        plt.show()
+
     # =============================================================================
     # Powerflow calculation
     # =============================================================================
     print("Calculating Net profile...")
-
 
     net_energy_use = E_charge_needs_total - pv
 
@@ -186,13 +207,14 @@ def calculateprofile(arrivalweekday, arrivalweekend, no_chargers, visu=False):
         ax.set_title('Net Energy Use by Quarter Hour')
         plt.show()
     print("Calculating Net profile completed!")
-    return net_energy_use
+    return E_charge_needs, pv, aclp
 
-def efficiencylosses(gridparams):
+
+def efficiencylosses(gridparams, evprofile, pvprofile, acprofile):
     # Part 1 DC-AC grid link (not existent for AC infrastructure) - converter 1
     vdc = gridparams["AC-DC CONVERTER 1"]["VDC"]
     vac = gridparams["AC-DC CONVERTER 1"]["VAC"]
-    gridpower = 60e3
+    gridpower = gridparams["AC-DC CONVERTER 1"]["Gridpower"]
     directory = r'data\effcurves\dc\dc-ac\grid'
 
     # Get a list of available power levels
@@ -203,7 +225,6 @@ def efficiencylosses(gridparams):
             power_levels.append(1000*power)
     # Round up the grid power to the nearest available power level
     nearest_power = min(power_levels, key=lambda x: abs(x - gridpower))
-
 
     for file in os.listdir(directory):
         # Check if the file is a numpy file
@@ -216,12 +237,16 @@ def efficiencylosses(gridparams):
                 # Load the numpy file and do something with it
                 file_path = os.path.join(directory, file)
                 effcurve = np.load(file_path)
-                print(f"Loaded file for converter 1:{file}")
+                print(f"Loaded converter file for converter 1 (AC-DC) for AC profile:{file}")
+                eff1 = np.zeros(len(acprofile))
                 # Do something with the data here
-                pp = round(100*gridpower/power)
-                eff1 = effcurve[pp]
-                print(f"Percentage load converter 1: {pp}%")
-                print(f"DC Efficiency for converter 1: {round(100*eff1,2)}%")
+                for i in range(acprofile.shape[0]):
+                    pp = round(100 * (acprofile[i] / (power * 0.25)))  # divide by 25 to convert kWh in quarter-hour to average kW for 15 min
+                    # converter gets overloaded error
+                    eff1[i] = effcurve[pp]  # array with converter efficiency in each quarter-hour
+                    np.set_printoptions()
+                print("Efficiencies for DC-AC: AC-profile conversion:")
+                print(eff1)
                 break  # Stop searching after finding the first match
 
     # Part 2 DC-AC / DC-DC EV charging - converter 2
@@ -252,17 +277,18 @@ def efficiencylosses(gridparams):
                 effcurve = np.load(file_path)
                 print(f"Loaded file for DC converter 2:{file}")
                 # Do something with the data here
-                pp = round(100 * evp / power)
-                V = np.arange(250, 370, 10) # FROM THE EFFICIENCY CURVES FILE
+                V = np.arange(250, 370, 10)  # FROM THE EFFICIENCY CURVES FILE
                 Vdc = np.arange(160, 380, 20)
-                # Find the index of the element in Vdc that is closest to voltage
-                vv = np.argmin(np.abs(V - evvdc))
-                print(f"Closest chosen EV voltage:{V[vv]} (actual:{evvdc}), element number: {vv}")
-                jj = np.argmin(np.abs(Vdc - vdc))
-                print(f"Closest chosen DC voltage:{Vdc[jj]} (actual:{vdc}), element number: {jj}")
-                eff2dc = effcurve[pp, vv, jj]
-                print(f"Percentage load DC converter 2: {pp}%")
-                print(f"DC Efficiency for DC converter 2: {round(100 * eff2dc, 2)}%")
+                eff2dc = np.zeros((EVprofile.shape[0], EVprofile.shape[1]))
+                for i in range(EVprofile.shape[1]):  # iterate over chargers
+                    for j in range(EVprofile.shape[0]):  # iterate over energy values
+                        pp = round(100 * (EVprofile[j,i] / (power*0.25)))
+                        vv = np.argmin(np.abs(V - evvdc))  # Find the index of the element in Vdc that is closest to voltage
+                        jj = np.argmin(np.abs(Vdc - vdc))
+                        eff2dc[j,i] = effcurve[pp, vv, jj]
+                eff2dc = eff2dc.flatten()
+                print("Efficiencies for DC-DC: EV-profile conversion:")
+                print(eff2dc)
                 break  # Stop searching after finding the first match
 
     # Part 2.1 AC efficiency
@@ -288,11 +314,16 @@ def efficiencylosses(gridparams):
                 effcurve = np.load(file_path)
                 print(f"Loaded file for AC converter 2:{file}")
                 # Do something with the data here
-                pp = round(100 * evp / power)
-                eff2ac = effcurve[pp]
-                print(f"Percentage load AC converter 2: {pp}%")
-                print(f"AC Efficiency for converter 2: {round(100 * eff2ac, 2)}%")
+                eff2ac = np.zeros((EVprofile.shape[0], EVprofile.shape[1]))
+                for i in range(EVprofile.shape[1]):
+                    for j in range(EVprofile.shape[0]):
+                        pp = round(100 * (EVprofile[j,i] / (power*0.25)))
+                        eff2ac[j,i] = effcurve[pp]
+                eff2ac = eff2ac.flatten()
+                print("Efficiencies for DC-AC: EV-profile conversion:")
+                print(eff2ac)
                 break  # Stop searching after finding the first match
+    return eff1, eff2dc, eff2ac
 
     # Part 3 DC-AC / DC-DC PV generation - converter 3
     # Part 3.1 DC efficiency
@@ -325,7 +356,7 @@ def efficiencylosses(gridparams):
                 pp = round(100 * pvp / power)
                 if pp == 100:  # nodig omdat 100% waarde niet bestaat in effcurve voor pv
                     pp = 99
-                V=np.arange(230, 490, 10)  # FROM THE EFFICIENCY CURVES FILE
+                V = np.arange(230, 490, 10)  # FROM THE EFFICIENCY CURVES FILE
                 # Find the index of the element in Vdc that is closest to voltage
                 vv = np.argmin(np.abs(V - pvvdc))
                 print(f"Closest chosen PV voltage:{V[vv]} (actual:{pvvdc}), element number: {vv}")
@@ -370,7 +401,7 @@ def efficiencylosses(gridparams):
                 pp = round(100 * bessp / power)
                 if pp == 100:
                     pp = 99
-                V=np.arange(690, 960, 10)  # FROM THE EFFICIENCY CURVES FILE
+                V = np.arange(690, 960, 10)  # FROM THE EFFICIENCY CURVES FILE
                 # Find the index of the element in Vdc that is closest to voltage
                 vv = np.argmin(np.abs(V - bessvdc))
                 print(f"Closest chosen BESS voltage:{V[vv]} (actual:{bessvdc}), element number: {vv}")
@@ -385,12 +416,15 @@ def efficiencylosses(gridparams):
     directory = r'data\effcurves\ac\dc-ac\bess'
     """
 
+
 # Distribution of arrival EVs CSV file names
 wkd = 'distribution-of-arrival.csv'
 wke = 'distribution-of-arrival (1).csv'
-
+acp = 'data/LoadProfiles/slp_industrie.csv'
+acdata = 'S12 56-100KVA'
+pvp = "pv_kWh_kWp.npy"
 # amount of chargers
-numb_chargers = 2
+numb_chargers = 1
 
 # =============================================================================
 # Grid parameters
@@ -398,10 +432,11 @@ numb_chargers = 2
 gridparameters = {
     "AC-DC CONVERTER 1": {
         "VDC": 700,
-        "VAC": 400
+        "VAC": 400,
+        "Gridpower": 90e3
     },
     "DC-DC/AC-DC CONVERTER 2": {
-        "EVPower": 2e3,
+        "EVPower": 7000,
         "EVVoltagedc": 360
     },
     "DC-DC/AC-DC CONVERTER 3": {
@@ -414,11 +449,11 @@ gridparameters = {
     }
 }
 
+# functies aanroepen
+
 VisualizeProfiles = False  # visualization of 35040 data points can
 # take a while (c.a. 30 sec on I7 8th gen -16GB RAM) and spin up your pc
 
-# NetEnergy = calculateprofile(wkd, wke, numb_chargers, VisualizeProfiles)
-# NetEnergy is an array with net energy use per quarter-hour for one whole year
-# print(NetEnergy)
+EVprofile, PVprofile, ACprofile = calculateprofile(wkd, wke, acp, acdata, pvp, numb_chargers, gridparameters, VisualizeProfiles)
 
-efficiencylosses(gridparameters)
+efficiencylosses(gridparameters, EVprofile, PVprofile, ACprofile)
